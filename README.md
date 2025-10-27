@@ -1,2 +1,2 @@
-# llm-recipe-genereation
+# llm-recipe-generation
 For Class
