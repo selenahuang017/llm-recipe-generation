@@ -4,7 +4,7 @@ class Validator:
     '''
     def __init__(self, args: dict,
         model: str = 'qwen3:4b',
-        url: str = 'http://ollama.loweffort.meme/api/chat', 
+        url: str = 'http://ollama.loweffort.meme/api/chat',
         verbose: bool = False):
         self.model = model
         self.url = url
