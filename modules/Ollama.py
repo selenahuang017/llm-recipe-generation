@@ -20,14 +20,14 @@ class OllamaChatSession:
         #TODO : create format
 
         # format here for initial request: currently simple
-        prompt = "Create a recipe with these ingredients:" + args.ingredients
+        prompt = f'Create a recipe with these ingredients: {args.ingredients}'
 
         return self.ask(prompt, verbose=args.verbose)
     
     def request(self, validation:str) -> str: 
         '''request from validator, has additional information'''
         # format here for return request.
-        prompt = "Update the previous recipe, but note the following:" + validation
+        prompt = f'Update the previous recipe, but note the following: {validation}'
 
         return self.ask(prompt)
 

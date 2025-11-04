@@ -14,7 +14,7 @@ class Validator:
     def check_sections(response:str):
         # if valid, return true
         # else return missing sections formatted
-        return True 
+        return True
     
     def check_ingredients(response:str):
         # if valid, return true
