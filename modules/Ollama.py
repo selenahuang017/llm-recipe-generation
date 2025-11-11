@@ -23,12 +23,15 @@ class OllamaChatSession:
             self.messages.append({'role': 'system', 'content': system_prompt})
 
     def initial_request(self, args:dict) -> str: 
-        #TODO : create format
+        ingredients = f'Create a recipe with these ingredients: {args.ingredients}.'
+        allergens = f'Note to avoid these allergens: {args.allergens}.' if args.allergens else ''
+        format = 'Put it in this format: 1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
+        budget = f'Make sure to stay under the budget of {args.budget} if possible. If not, indicate so.' if args.budget else ''
+        calories = f'Return the projected calories and aim for {args.calories}. Indicate if over or under the projection.' if args.calories else ''
 
-        # format here for initial request: currently simple
-        prompt = f'Create a recipe with these ingredients: {args.ingredients}'
+        prompt = f"""{ingredients} {format} {allergens} {budget} {calories}"""
         if self.verbosity:
-            print(f'Prompt:{prompt}')
+            print(f'Prompt: {prompt}')
         return self.ask(prompt)
     
     def request(self, validation:str) -> str: 
