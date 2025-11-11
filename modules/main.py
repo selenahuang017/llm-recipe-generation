@@ -9,7 +9,7 @@ def parse_args() -> argparse.Namespace:
         '--model',
         type=str,
         choices=['gpt-oss:20b', 'gpt-oss:120b', 'gemma3:27b',],
-        required=False,
+        required=True,
         default='gpt-oss:20b',
         help='define model to ask one of them',
     )
@@ -39,6 +39,14 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help='verbosity, True includes debug information',
     )
+    p.add_argument(
+        '--val_model',
+        type=str,
+        choices=['gpt-oss:20b', 'gpt-oss:120b', 'gemma3:27b'],
+        required=False,
+        default='gpt-oss:20b',
+        help='define model to use for validation',
+    )
 
     # can add more as needed: budget, calorie information
     return p.parse_args()
@@ -47,10 +55,15 @@ def generate_recipe(args):
     session = OllamaChatSession(
         model=args.model,
         system_prompt='You are a chef generating recipes with the given limitations.',
+        verbose=args.verbose
     )
     validator = Validator(args)
+    if args.verbose:
+        print('Created chat session and validator.')
     recipe = session.initial_request(args)
     for i in range(args.max_iterations):
+        if args.verbose:
+            print(f'Validating try {i + 1}.')
         check = validator.validate(recipe)
         if recipe is True:
             return recipe
@@ -59,6 +72,7 @@ def generate_recipe(args):
 
 def main():
     args = parse_args()
+    print("args parsed:", args)
     recipe = generate_recipe(args)
     print(recipe)
 

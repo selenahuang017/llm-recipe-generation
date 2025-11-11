@@ -1,0 +1,18 @@
+[project]
+name = "llm-recipe-generation"
+version = "0.1.0"
+description = "LLM Recipe Generation project."
+authors = [{ name = "Selena", email = "you@example.com" }, { name = "Scott Ellis", email = "you@example.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "requests"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["modules"]
