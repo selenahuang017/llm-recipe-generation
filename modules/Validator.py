@@ -1,4 +1,7 @@
+import os
+import requests
 from .Ollama import OllamaChatSession
+
 
 class Validator:
     '''
@@ -9,45 +12,147 @@ class Validator:
         self.model =  OllamaChatSession(
             model=args.val_model,
             system_prompt='You will validate the correctness of the recipe against the given rules. These must be strict to ensure safety.',
-            verbose=args.verbose
-        )
+            verbose=args.verbose,
+            )
         self.url = url
         self.verbose = args.verbose
         self.args = args
 
-    def check_sections(self, response:str):
+        # Load API key from environment
+        self.fdc_api_key = os.environ.get('FDC_API_KEY')
+        if not self.fdc_api_key:
+            raise ValueError('FDC_API_KEY environment variable is not set.')
+
+    def check_sections(self, response: str):
         format = '1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
-        prompt = f'''Check if this recipe {response} is in this format: {format}. 
-            Return only the string "True" if correct, else return only the missing sections.'''
-        response = self.model.ask(prompt)
-        if self.verbose: 
-            print(f'Check sections: {response}')
-        if response == 'True':
+        prompt = f"""Check if this recipe {response} is in this format: {format}. 
+    Return only the string 'True' if correct, else return only the missing sections."""
+        resp = self.model.ask(prompt)
+        if self.verbose:
+            print(f'Check sections: {resp}')
+        if resp.strip().lower() == 'true':
             return True
-        return response
+        return resp.strip()
     
     def check_ingredients(self, response:str):
         ingredients = self.args.ingredients
         prompt = f'''Check if this recipe {response} includes the ingredients: {ingredients} in both the Ingredients and Instructions sections.
-            Return only the string "True" if correct, else return only the missing sections.'''
+            Return only the string 'True' if correct, else return only the missing sections.'''
         response = self.model.ask(prompt)
         if self.verbose: 
             print(f'Check sections: {response}')
-        if response == 'True':
+        if response == 'true':
             return True
         return response
 
-    def check_allergens(self, response:str):
-        # if valid, return true
-        # else return missing ingredients formatted
-        return True 
+    def check_allergens(self, response: str):
+        '''
+        Simple allergen check: scan the Ingredients and Instructions sections
+        for any allergen keywords from args.allergens_to_avoid.
+        '''
+        allergens = getattr(self.args, 'allergens_to_avoid', [])
+        if not allergens:
+            return True  # no allergens to check against
+
+        missing = []
+        lower = response.lower()
+        for allergen in allergens:
+            if allergen.lower() in lower:
+                missing.append(allergen)
+
+        if missing:
+            return ('Allergen(s) present): ' + ', '.join(missing))
+        return True
     
     # add more checks as needed
     def check_budget(self, response:str):
         pass
 
-    def check_calories(self, response:str):
-        pass
+    def check_calories(self, response: str):
+        '''
+        Attempt to compute total calories by summing calories of each ingredient via FDC API.
+        Compare against max_calories if provided in args.max_calories.
+        Requires that Ingredients list includes amounts with units in a parseable way.
+        '''
+        # This is a simplification: relies on being able to parse ingredient lines.
+        import re
+
+        lines = response.splitlines()
+        # naive parse: find lines under 'Ingredients' section
+        in_ingredients = False
+        ingredient_lines = []
+        for line in lines:
+            if line.lower().startswith('3. ingredients'):  # or similar
+                in_ingredients = True
+                continue
+            if in_ingredients:
+                if re.match(r'^\d+\.', line):  # next numbered section line
+                    break
+                ingredient_lines.append(line.strip())
+
+        if not ingredient_lines:
+            return 'Could not parse ingredient list to compute calories'
+
+        total_cal = 0.0
+        missing_ingredients = []
+        for ing in ingredient_lines:
+            # very naive splitting: '2 cups flour' --> qty=2, unit=cups, name=flour
+            m = re.match(r'([0-9/\.]+)\s+(\w+)\s+(.*)', ing)
+            if not m:
+                missing_ingredients.append(ing)
+                continue
+            qty, unit, name = m.groups()
+            # convert fraction if needed
+            try:
+                qty = float(eval(qty))
+            except Exception:
+                missing_ingredients.append(ing)
+                continue
+
+            # Query FDC for this ingredient
+            params = {
+                'query': name,
+                'pageSize': 1,
+                'api_key': self.fdc_api_key
+            }
+            resp = requests.get('https://api.nal.usda.gov/fdc/v1/foods/search', params=params)
+            if resp.status_code != 200:
+                missing_ingredients.append(name)
+                continue
+            data = resp.json()
+            foods = data.get('foods')
+            if not foods:
+                missing_ingredients.append(name)
+                continue
+            food = foods[0]
+            # find calorie nutrient
+            calories = None
+            for nutrient in food.get('foodNutrients', []):
+                if nutrient.get('nutrientName') == 'Energy' and nutrient.get('unitName') == 'KCAL':
+                    calories = nutrient.get('value')
+                    break
+            if calories is None:
+                missing_ingredients.append(name)
+                continue
+
+            # Now, we need serving size info; FDC returns per 100g or per serving; this is a simplification:
+            # assume calories value corresponds to 100g, and qty * unit -> grams conversion missing -> rough estimate:
+            # for simplicity, treat qty as 'grams' if unit is 'g', else ignore unit conversion.
+            if unit.lower() in ('g', 'gram', 'grams'):
+                total_cal += (calories / 100.0) * qty
+            else:
+                # unable to convert non-gram units safely
+                missing_ingredients.append(f'{name} (unit {unit})')
+
+        if missing_ingredients:
+            return 'Could not compute calories for: ' + ', '.join(missing_ingredients)
+
+        max_cal = getattr(self.args, 'max_calories', None)
+        if max_cal is not None:
+            if total_cal > max_cal:
+                return f'Total calories {total_cal:.1f} exceeds limit {max_cal}'
+
+        return True
 
     def validate(self, response: str):
         '''
@@ -59,8 +164,9 @@ class Validator:
             self.check_sections,
             self.check_ingredients,
             self.check_allergens,
-            self.check_budget  # can add more
-        ]
+            self.check_calories,
+            self.check_budget,
+            ]
         
         errors = []
         
@@ -71,7 +177,9 @@ class Validator:
         
         validation = True
         if errors:
-            validation = " | ".join(errors)  # Combine all msg
+            validation = ' | '.join(errors)  # Combine all msg
+        else:
+            validation = True
         
         if self.verbose:
             print(f'Validation: {validation}')
