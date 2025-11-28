@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from .Ollama import OllamaChatSession
 
@@ -25,25 +26,29 @@ class Validator:
 
     def check_sections(self, response: str):
         format = '1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
-        prompt = f"""Check if this recipe {response} is in this format: {format}. 
-    Return only the string 'True' if correct, else return only the missing sections."""
-        resp = self.model.ask(prompt)
-        if self.verbose:
-            print(f'Check sections: {resp}')
-        if resp.strip().lower() == 'true':
-            return True
-        return resp.strip()
-    
-    def check_ingredients(self, response:str):
-        ingredients = self.args.ingredients
-        prompt = f'''Check if this recipe {response} includes the ingredients: {ingredients} in both the Ingredients and Instructions sections.
-            Return only the string 'True' if correct, else return only the missing sections.'''
+        prompt = f'''Check if this recipe {response} is in this format: {format}.\nReturn only the string 'True' if correct, else return only the missing sections.'''
+        
         response = self.model.ask(prompt)
-        if self.verbose: 
+        if self.verbose:
             print(f'Check sections: {response}')
-        if response == 'true':
+        
+        if response.strip().lower() == 'true':
             return True
-        return response
+        
+        return response.strip()
+    
+    def check_ingredients(self, response: str):
+        ingredients = self.args.ingredients
+        prompt = f'''Check if this recipe {response} includes the ingredients: {ingredients} in both the Ingredients and Instructions sections.\nReturn only the string 'True' if correct, else return only the missing sections.'''
+        
+        model_response = self.model.ask(prompt)
+        if self.verbose:
+            print(f'Check ingredients: {model_response}')
+        
+        if model_response.strip().lower() == 'true':
+            return True
+        
+        return model_response.strip()
 
     def check_allergens(self, response: str):
         '''
@@ -52,20 +57,21 @@ class Validator:
         '''
         allergens = getattr(self.args, 'allergens_to_avoid', [])
         if not allergens:
-            return True  # no allergens to check against
+            return True
 
-        missing = []
+        allergens_found = []
         lower = response.lower()
         for allergen in allergens:
             if allergen.lower() in lower:
-                missing.append(allergen)
+                allergens_found.append(allergen)
 
-        if missing:
-            return ('Allergen(s) present): ' + ', '.join(missing))
+        if allergens_found:
+            allergen_output = 'Allergen(s) present): ' + ', '.join(allergens_found)
+            return allergen_output
         return True
     
     # add more checks as needed
-    def check_budget(self, response:str):
+    def check_budget(self, response: str):
         pass
 
     def check_calories(self, response: str):
@@ -74,19 +80,18 @@ class Validator:
         Compare against max_calories if provided in args.max_calories.
         Requires that Ingredients list includes amounts with units in a parseable way.
         '''
-        # This is a simplification: relies on being able to parse ingredient lines.
-        import re
 
         lines = response.splitlines()
-        # naive parse: find lines under 'Ingredients' section
+        # Naive parse: find lines under 'Ingredients' section
         in_ingredients = False
         ingredient_lines = []
         for line in lines:
-            if line.lower().startswith('3. ingredients'):  # or similar
+            # Whatever header part we need here:
+            if line.lower().startswith('3. ingredients'):
                 in_ingredients = True
                 continue
             if in_ingredients:
-                if re.match(r'^\d+\.', line):  # next numbered section line
+                if re.match(r'^\d+\.', line):
                     break
                 ingredient_lines.append(line.strip())
 
@@ -135,9 +140,6 @@ class Validator:
                 missing_ingredients.append(name)
                 continue
 
-            # Now, we need serving size info; FDC returns per 100g or per serving; this is a simplification:
-            # assume calories value corresponds to 100g, and qty * unit -> grams conversion missing -> rough estimate:
-            # for simplicity, treat qty as 'grams' if unit is 'g', else ignore unit conversion.
             if unit.lower() in ('g', 'gram', 'grams'):
                 total_cal += (calories / 100.0) * qty
             else:
