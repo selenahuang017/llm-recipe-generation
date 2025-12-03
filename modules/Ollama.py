@@ -23,13 +23,14 @@ class OllamaChatSession:
             self.messages.append({'role': 'system', 'content': system_prompt})
 
     def initial_request(self, args:dict) -> str: 
-        ingredients = f'Create a recipe with these ingredients: {args.ingredients}.'
+        ingredients = f'Create a meal plan with these ingredients: {args.ingredients}. All ingredients must be used across the three meals (breakfast, lunch, and dinner), but the recipes should be diverse and different from each other.'
         allergens = f'Note to avoid these allergens: {args.allergens}.' if args.allergens else ''
-        format = 'Put it in this format: 1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
-        budget = f'Make sure to stay under the budget of {args.budget} if possible. If not, indicate so.' if args.budget else ''
-        calories = f'Return the projected calories and aim for {args.calories}. Indicate if over or under the projection.' if args.calories else ''
+        format = 'Put each recipe in this format: 1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
+        meal_plan_format = 'Structure the meal plan as follows: BREAKFAST: [recipe format] LUNCH: [recipe format] DINNER: [recipe format]'
+        budget = f'Make sure to stay under the budget of ${args.budget} if possible. If not, indicate so.' if getattr(args, 'budget', None) else ''
+        calories = f'Return the projected calories and aim for {args.calories}. Indicate if over or under the projection.' if getattr(args, 'calories', None) else ''
 
-        prompt = f"""{ingredients} {format} {allergens} {budget} {calories}"""
+        prompt = f"""{ingredients} {meal_plan_format} {format} {allergens} {budget} {calories}"""
         if self.verbosity:
             print(f'Prompt: {prompt}')
         return self.ask(prompt)
@@ -37,7 +38,7 @@ class OllamaChatSession:
     def request(self, validation:str) -> str: 
         '''request from validator, has additional information'''
         # format here for return request.
-        prompt = f'Update the previous recipe, but note the following: {validation}'
+        prompt = f'Update the previous meal plan, but note the following: {validation}'
 
         return self.ask(prompt)
 
@@ -59,14 +60,10 @@ class OllamaChatSession:
                 j = json.loads(line)
                 msg = j.get('message', {}).get('content', '')
                 if msg:
-                    if self.verbosity:
-                        print(msg, end='', flush=True)
                     output.append(msg)
         #print()
         full_response = ''.join(output)
 
-        if self.verbosity:
-            print(f'Response:{full_response}')
         # Store assistant reply in memory
         self.messages.append({'role': 'assistant', 'content': full_response})
         return full_response
