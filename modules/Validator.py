@@ -771,7 +771,7 @@ Only provide the final answer line, nothing else.'''
         }
         all_missing = []
         calorie_issues = []
-        nutrition_mismatches = []
+        caloric_mismatches = []
         tolerance = 0.1  # 10% tolerance
         
         for meal_type, recipe in recipes.items():
@@ -792,26 +792,29 @@ Only provide the final answer line, nothing else.'''
             # Extract stated nutrition from section 5
             stated_nutrition = self._extract_nutritional_info(recipe)
             
-            # Compare calculated vs stated with tolerance
-            for nutrient_key in ['calories', 'protein', 'fat', 'carbs', 'fiber']:
-                calculated = calculated_nutrition.get(nutrient_key, 0.0)
-                stated = stated_nutrition.get(nutrient_key)
+            # Compare calculated vs stated - check calories for mismatches, but report all as info
+            # First, check calories for tolerance mismatches
+            calculated_calories = calculated_nutrition.get('calories', 0.0)
+            stated_calories = stated_nutrition.get('calories')
+            
+            if stated_calories is not None:
+                # Calculate tolerance range for calories only
+                lower_bound = stated_calories * (1 - tolerance)
+                upper_bound = stated_calories * (1 + tolerance)
                 
-                if stated is not None:
-                    # Calculate tolerance range
-                    lower_bound = stated * (1 - tolerance)
-                    upper_bound = stated * (1 + tolerance)
-                    
-                    # Check if calculated is within tolerance
-                    if calculated < lower_bound or calculated > upper_bound:
-                        diff_percent = abs((calculated - stated) / stated * 100) if stated > 0 else 0
-                        nutrient_name = nutrient_key.capitalize()
-                        if nutrient_key == 'carbs':
-                            nutrient_name = 'Carbohydrates'
-                        nutrition_mismatches.append(
-                            f'{meal_type.capitalize()}: Calculated {nutrient_name.lower()} {calculated:.1f} {self._get_nutrient_unit(nutrient_key)}, '
-                            f'stated {stated:.1f} {self._get_nutrient_unit(nutrient_key)} ({diff_percent:.1f}% difference exceeds {tolerance*100:.0f}% tolerance)'
-                        )
+                # Calculate difference percentage (used in both cases)
+                diff_percent = abs((calculated_calories - stated_calories) / stated_calories * 100) if stated_calories > 0 else 0
+                
+                # Check if calculated calories are within tolerance
+                is_within_tolerance = lower_bound <= calculated_calories <= upper_bound
+                
+                # Build message - always report, but indicate if it exceeds tolerance
+                if is_within_tolerance:
+                    message = f'{meal_type.capitalize()}: Calories calculated {calculated_calories:.1f} kcal, stated {stated_calories:.1f} kcal ({diff_percent:.1f}% difference)'
+                else:
+                    message = f'{meal_type.capitalize()}: Calculated calories {calculated_calories:.1f} kcal, stated {stated_calories:.1f} kcal ({diff_percent:.1f}% difference exceeds {tolerance*100:.0f}% tolerance)'
+                
+                caloric_mismatches.append(message)
         
         # Check if we were able to calculate nutrition for at least one meal
         # If all meals have missing ingredients or no meals were processed, that's a failure
@@ -852,25 +855,22 @@ Only provide the final answer line, nothing else.'''
                     f'{nutrition["protein"]:.1f}g protein, {nutrition["fat"]:.1f}g fat, '
                     f'{nutrition["carbs"]:.1f}g carbs, {nutrition["fiber"]:.1f}g fiber'
                 )
-        
         total_summary = (
             f'Total: {total_nutrition["calories"]:.1f} kcal, '
             f'{total_nutrition["protein"]:.1f}g protein, {total_nutrition["fat"]:.1f}g fat, '
             f'{total_nutrition["carbs"]:.1f}g carbs, {total_nutrition["fiber"]:.1f}g fiber'
         )
-        
         nutrition_info = ' | '.join(per_meal_summary) + ' | ' + total_summary
-        
         # Build message with nutritional info and any issues
-        message_parts = [f'Nutritional information: {nutrition_info}']
+        message_parts = [f'Calculated nutritional information: {nutrition_info}']
         
         # Add missing ingredients information (if any)
         if all_missing:
             message_parts.append(f'Warning: Could not compute nutrition for some ingredients: {", ".join(all_missing)}. Calculated values may be incomplete.')
         
         # Add nutrition mismatches (to ask model to update stated values)
-        if nutrition_mismatches:
-            message_parts.append(f'Please update the nutritional information in section 5 to match calculated values: {" | ".join(nutrition_mismatches)}')
+        if caloric_mismatches:
+            message_parts.append(f'Please update the recipe because the calories are not near the target: {" | ".join(caloric_mismatches)}')
         
         # Add calorie issues (to ask model to adjust recipes)
         if calorie_issues:
@@ -883,7 +883,6 @@ Only provide the final answer line, nothing else.'''
         # If we have missing ingredients but calculated some nutrition, it's a partial success
         # Only fail if we have critical missing ingredients that prevent all calculations
         has_critical_missing = all_missing and not meal_nutrition
-        
         return {
             'success': not has_calorie_issues and not has_critical_missing,
             'message': '. '.join(message_parts)
