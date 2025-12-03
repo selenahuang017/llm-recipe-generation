@@ -1,0 +1,79 @@
+Prompt: Create a meal plan with these ingredients: white rice, oranges, potatoes, gluten-free oreos, duck, ramen. All ingredients must be used across the three meals (breakfast, lunch, and dinner), but the recipes should be diverse and different from each other. Structure the meal plan as follows: BREAKFAST: [recipe format] LUNCH: [recipe format] DINNER: [recipe format] Put each recipe in this format: 1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else. Note to avoid these allergens: gluten.  Return the projected calories and aim for 2000. Indicate if over or under the projection.
+Meal plan:
+**BREAKFAST**
+
+1. **Title** – Orange‑Rice Porridge with Oreo Crunch  
+2. **Serving size** – 1 person  
+3. **Ingredients & amounts**  
+   - 3/4 cup cooked white rice (≈ 165 cal)  
+   - 3/4 cup unsweetened almond milk (≈ 75 cal)  
+   - 2 gluten‑free Oreos (≈ 140 cal)  
+   - 1/2 orange – juice & zest (≈ 45 cal)  
+   - 1 tsp honey (≈ 30 cal)  
+   - Pinch of salt  
+4. **Instructions**  
+   1. In a small saucepan, combine the cooked rice, almond milk, and a pinch of salt.  
+   2. Warm over medium heat, stirring until the mixture thickens to a porridge‑like consistency (about 3 min).  
+   3. Remove from heat, stir in orange juice and zest, then fold in honey.  
+   5. Sprinkle the crumbled Oreos over the top just before serving.  
+5. **Nutritional information** – Approx. 535 kcal (protein ≈ 6 g, fat ≈ 8 g, carbs ≈ 95 g).  
+6. **Anything else** – Gluten‑free; no added wheat or rye products.
+
+---
+
+**LUNCH**
+
+1. **Title** – Duck & Ramen Stir‑Fry with Orange‑Glazed Potatoes  
+2. **Serving size** – 1 person  
+3. **Ingredients & amounts**  
+   - 5 oz sliced duck breast (≈ 300 cal)  
+   - 1.5 cups dry gluten‑free ramen noodles (≈ 450 cal)  
+   - 1 medium potato, diced (≈ 110 cal)  
+   - 1/2 orange – juice & zest (≈ 45 cal)  
+   - 1 tsp olive oil (≈ 40 cal)  
+   - 1 tbsp gluten‑free soy sauce (≈ 10 cal)  
+   - 1 tsp honey (≈ 20 cal)  
+   - Salt & pepper to taste  
+4. **Instructions**  
+   1. Cook ramen according to package instructions (using gluten‑free noodles). Drain and set aside.  
+   2. Heat the olive oil in a large skillet over medium‑high heat. Add duck breast slices, searing until browned and cooked through (~ 4–5 min). Remove and slice into bite‑sized pieces.  
+   3. In the same skillet, toss diced potato, cooking until just tender and lightly crisp (≈ 7 min).  
+   4. Return duck to the skillet, add the cooked ramen, orange juice & zest, soy sauce, and honey. Stir everything together, letting the sauce coat the noodles and potatoes (≈ 2 min).  
+   5. Season with salt & pepper, serve hot.  
+5. **Nutritional information** – Approx. 945 kcal (protein ≈ 32 g, fat ≈ 32 g, carbs ≈ 120 g).  
+6. **Anything else** – Uses gluten‑free ramen; all other ingredients are naturally gluten‑free.
+
+---
+
+**DINNER**
+
+1. **Title** – Roasted Duck Thigh with Orange‑Glazed Potatoes  
+2. **Serving size** – 1 person  
+3. **Ingredients & amounts**  
+   - 5 oz duck thigh, bone‑in (≈ 300 cal)  
+   - 1 medium potato, cubed (≈ 110 cal)  
+   - 1/2 orange – juice & zest (≈ 45 cal)  
+   - 1 tsp olive oil (≈ 40 cal)  
+   - 1 tsp honey (≈ 20 cal)  
+   - Salt, pepper, and a pinch of smoked paprika  
+4. **Instructions**  
+   1. Preheat the oven to 375 °F (190 °C).  
+   2. Toss potato cubes with olive oil, salt, pepper, and paprika; spread on a baking sheet.  
+   3. Place the duck thigh skin‑side up on the sheet and roast for 25–30 min, until the skin is crisp and the meat reaches an internal temperature of 165 °F (74 °C).  
+   4. While the duck roasts, whisk orange juice, zest, and honey together.  
+   5. Once the duck is done, remove from the oven and brush the orange glaze over the skin. Return to the oven for an additional 5 min to caramelize the glaze.  
+   6. Serve the roasted duck alongside the glazed potatoes.  
+5. **Nutritional information** – Approx. 480 kcal (protein ≈ 24 g, fat ≈ 28 g, carbs ≈ 35 g).  
+6. **Anything else** – Entire dish is gluten‑free; no wheat, barley, or rye.
+
+---
+
+### Projected Daily Calorie Total
+
+- **Breakfast:** 535 kcal  
+- **Lunch:** 945 kcal  
+- **Dinner:** 480 kcal  
+- **Total:** **1,960 kcal**  
+
+**Result:** **Under the 2,000 kcal projection by ~40 kcal.**  
+Feel free to add a small snack (e.g., a handful of nuts) if you’d like to reach closer to 2,000 kcal.
