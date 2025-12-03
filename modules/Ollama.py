@@ -10,7 +10,7 @@ class OllamaChatSession:
 
     def __init__(self,
                  model: str = 'gpt-oss:20b',
-                 url: str = 'http://ollama.loweffort.meme/api/chat',
+                 url: str = 'https://ollama.loweffort.meme/api/chat',
                  system_prompt: Optional[str] = None,
                  stream: bool = True,
                  verbose: bool = False):

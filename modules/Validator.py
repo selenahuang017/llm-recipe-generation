@@ -10,7 +10,7 @@ class Validator:
     Takes a string in as a response, and validates the response
     '''
     def __init__(self, args: dict,
-        url: str = 'http://ollama.loweffort.meme/api/chat'):
+        url: str = 'https://ollama.loweffort.meme/api/chat'):
         self.model =  OllamaChatSession(
             model=args.val_model,
             system_prompt='You will validate the correctness of the recipe against the given rules. These must be strict to ensure safety.',
