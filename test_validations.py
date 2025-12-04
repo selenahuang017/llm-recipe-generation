@@ -36,12 +36,25 @@ def load_secrets(secrets_file: str = '.secrets'):
     else:
         print(f'Note: Secrets file not found at {secrets_path}')
 
-def setup():
-    '''Setup test environment - load secrets, read example.txt, create validator'''
+def setup(input_file: str = 'example.txt'):
+    '''Setup test environment - load secrets, read input file, create validator'''
     load_secrets()
     
-    # Read example.txt
-    with open('example.txt', 'r') as f:
+    # Read input file (try relative to script directory first, then current directory)
+    file_path = Path(input_file)
+    if not file_path.is_absolute():
+        # Try relative to script directory first
+        script_dir = Path(__file__).parent
+        potential_path = script_dir / input_file
+        if potential_path.exists():
+            file_path = potential_path
+        elif Path(input_file).exists():
+            # Use current directory path
+            file_path = Path(input_file)
+        else:
+            raise FileNotFoundError(f'Could not find file: {input_file}')
+    
+    with open(file_path, 'r') as f:
         example_content = f.read()
     
     # Create a mock args object for testing
@@ -75,7 +88,7 @@ def print_result(result):
     '''Print validation result in a formatted way'''
     status = '✓ PASS' if result.get('success', False) else '✗ FAIL'
     print(f'\nStatus: {status}')
-    print(f'Message: {result.get('message', 'No message')}')
+    print(f"Message: {result.get('message', 'No message')}")
     return result.get('success', False)
 
 def test_extract_recipes(validator, example_content):
@@ -203,9 +216,9 @@ def test_recipe_quality_evaluation(validator, example_content):
     )
     return test_pass
 
-def run_all_tests():
+def run_all_tests(input_file: str = 'example.txt'):
     '''Run all tests'''
-    validator, example_content, args = setup()
+    validator, example_content, args = setup(input_file)
     
     # Run all tests
     test_results = []
@@ -281,6 +294,12 @@ def main():
         action='store_true',
         help='List all available tests'
     )
+    parser.add_argument(
+        '--file',
+        type=str,
+        default='example.txt',
+        help='Input file to use for testing (default: example.txt)'
+    )
     
     args = parser.parse_args()
     
@@ -298,44 +317,34 @@ def main():
         print('  10. Quality Evaluation')
         return
     
-    validator, example_content, mock_args = setup()
+    validator, example_content, mock_args = setup(args.file)
     recipes = validator.extract_recipes(example_content)
     
     if args.test:
-        # Run specific test
-        if args.test == 1:
-            result, _ = test_extract_recipes(validator, example_content)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 2:
-            result = test_check_meal_plan_structure(validator, example_content)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 3:
-            result = test_check_sections(validator, recipes)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 4:
-            result = test_check_ingredients(validator, example_content)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 5:
-            result = test_check_allergens(validator, recipes)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 6:
-            result = test_parse_ingredients(validator, recipes)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 7:
-            result = test_check_nutrition(validator, example_content)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 8:
-            result = test_check_budget(validator, example_content, mock_args)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 9:
-            result = test_full_validation(validator, example_content)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
-        elif args.test == 10:
-            result = test_recipe_quality_evaluation(validator, example_content)
-            print(f'\nTest {args.test} result: {'✓ PASS' if result else '✗ FAIL'}')
+        # Map test numbers to their test functions
+        test_functions = {
+            1: lambda: test_extract_recipes(validator, example_content)[0],  # Returns tuple, take first element
+            2: lambda: test_check_meal_plan_structure(validator, example_content),
+            3: lambda: test_check_sections(validator, recipes),
+            4: lambda: test_check_ingredients(validator, example_content),
+            5: lambda: test_check_allergens(validator, recipes),
+            6: lambda: test_parse_ingredients(validator, recipes),
+            7: lambda: test_check_nutrition(validator, example_content),
+            8: lambda: test_check_budget(validator, example_content, mock_args),
+            9: lambda: test_full_validation(validator, example_content),
+            10: lambda: test_recipe_quality_evaluation(validator, example_content),
+        }
+        
+        # Run the selected test
+        if args.test in test_functions:
+            result = test_functions[args.test]()
+            status = '✓ PASS' if result else '✗ FAIL'
+            print(f'\nTest {args.test} result: {status}')
+        else:
+            print(f'Error: Test {args.test} not found')
     else:
         # Run all tests
-        run_all_tests()
+        run_all_tests(args.file)
 
 if __name__ == '__main__':
     main()
