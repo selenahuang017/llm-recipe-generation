@@ -840,7 +840,6 @@ Only provide the final answer line, nothing else.'''
         if min_total_cal is not None:
             if total_nutrition['calories'] < min_total_cal:
                 calorie_issues.append(f'Total calories {total_nutrition["calories"]:.1f} kcal below minimum of {min_total_cal:.1f} kcal')
-        if max_total_cal is not None:
             if total_nutrition['calories'] > max_total_cal:
                 calorie_issues.append(f'Total calories {total_nutrition["calories"]:.1f} kcal exceeds maximum of {max_total_cal:.1f} kcal')
         
