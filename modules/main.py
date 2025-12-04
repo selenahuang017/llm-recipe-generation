@@ -24,8 +24,7 @@ def load_secrets(secrets_file: str = '.secrets'):
                     key, value = line.split('=', 1)
                     os.environ[key.strip()] = value.strip()
     else:
-        # Silently fail if secrets file doesn't exist
-        # (user might be setting env vars another way)
+        # Silently fail if secrets file doesn't exist (user might be setting env vars another way)
         pass
 
 def parse_args() -> argparse.Namespace:
@@ -100,41 +99,76 @@ def generate_meal_plan(args):
         system_prompt='You are a chef generating meal plans with the given limitations.',
         verbose=args.verbose
     )
+
     validator = Validator(args)
+
     if args.verbose:
         print('Created chat session and validator.')
+
+    # Initial generation
     meal_plan = session.initial_request(args)
+
     if args.verbose:
         print(f'\nResponse:{meal_plan}')
-    iteration_history = [meal_plan]  # Track iteration history for metrics
-    
+
+    iteration_history = [meal_plan]
     iterations_taken = 0
     validation_result = None
+
+    # Extract the original user instruction from the conversation history
+    original_instruction = session.get_initial_user_message()
+
     for i in range(args.max_iterations):
         iterations_taken = i + 1
+
         if args.verbose:
             print('===================')
             print(f'Validating try {iterations_taken}.')
+
         validation_result = validator.validate(meal_plan)
+
+        # Success: stop iterating
         if isinstance(validation_result, dict) and validation_result.get('success', False):
-            # Validation passed, but don't evaluate yet - wait until after loop
             break
-        # Extract message from validation result
+
+        # Extract the validator's message explaining what to fix
         if isinstance(validation_result, dict):
             check_message = validation_result.get('message', '')
         else:
             check_message = str(validation_result)
-        meal_plan = session.request(check_message)
+
+        # Construct the targeted-repair retry prompt
+        retry_prompt = f"""
+Your previous meal plan was invalid for the following reason(s):
+{validation_result['message']}
+
+You must generate a **brand new** meal plan from scratch.
+
+Follow these rules exactly:
+{original_instruction}
+
+Do NOT summarize.
+Do NOT reference the previous attempt.
+Output the full meal plan again with clearly labeled sections:
+BREAKFAST
+LUNCH
+DINNER
+"""
+
+        # Ask the model to repair only the failed portions
+        meal_plan = session.request(retry_prompt)
+
         iteration_history.append(meal_plan)
+
     else:
-        # Loop completed without breaking (max iterations reached)
-        # Final validation result already set in last iteration
+        # Max iterations reached; validation_result contains the last validator output
         pass
-    
-    # Now evaluate only the final meal plan (whether validation passed or not)
+
+    # Perform final recipe quality evaluation regardless of validation success
     quality_evaluation = validator.evaluate_recipe_quality(meal_plan)
-    
+
     return meal_plan, iterations_taken, validation_result, iteration_history, quality_evaluation
+
 
 def main():
     # Load secrets from .secrets file into os.environ

@@ -29,55 +29,53 @@ class Validator:
 
     def extract_recipes(self, meal_plan: str) -> Dict[str, str]:
         '''
-        Extract individual recipes from meal plan response.
-        Returns dict with keys: 'breakfast', 'lunch', 'dinner'
-        Handles multiple formats: "BREAKFAST:", "## BREAKFAST", "BREAKFAST"
+        Extremely robust extractor for BREAKFAST, LUNCH, DINNER from messy LLM output.
+        Handles markdown, colons, multiple hashes, bold, spacing, dashes, etc.
         '''
         recipes = {'breakfast': '', 'lunch': '', 'dinner': ''}
-        
-        # Split by ## headers to find sections
-        # Pattern to find ## BREAKFAST, ## LUNCH, ## DINNER
-        sections = re.split(r'\n\s*##\s*(BREAKFAST|LUNCH|DINNER)\s*\n', meal_plan, flags=re.IGNORECASE)
-        
-        # sections[0] is content before first header
-        # Then alternating: section_name, content, section_name, content, ...
-        for i in range(1, len(sections), 2):
-            if i + 1 < len(sections):
-                section_name = sections[i].lower()
-                content = sections[i + 1]
-                
-                # Stop at next ## header or end of string
-                # Remove content after next ## header if present
-                next_header_match = re.search(r'\n\s*##\s*(BREAKFAST|LUNCH|DINNER)', content, re.IGNORECASE)
-                if next_header_match:
-                    content = content[:next_header_match.start()].strip()
-                else:
-                    content = content.strip()
-                
-                if section_name == 'breakfast':
-                    recipes['breakfast'] = content
-                elif section_name == 'lunch':
-                    recipes['lunch'] = content
-                elif section_name == 'dinner':
-                    recipes['dinner'] = content
-        
-        # Fallback: try regex patterns if split didn't work
-        if not any(recipes.values()):
-            breakfast_pattern = r'(?:^|\n)\s*#*\s*BREAKFAST[:\s]*\s*\n+(.*?)(?=\n\s*##\s*(?:LUNCH|DINNER)|$)'
-            lunch_pattern = r'(?:^|\n)\s*#*\s*LUNCH[:\s]*\s*\n+(.*?)(?=\n\s*##\s*(?:DINNER|BREAKFAST)|$)'
-            dinner_pattern = r'(?:^|\n)\s*#*\s*DINNER[:\s]*\s*\n+(.*?)(?=\n\s*##\s*(?:BREAKFAST|LUNCH)|$)'
-            
-            breakfast_match = re.search(breakfast_pattern, meal_plan, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            lunch_match = re.search(lunch_pattern, meal_plan, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            dinner_match = re.search(dinner_pattern, meal_plan, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-            
-            if breakfast_match:
-                recipes['breakfast'] = breakfast_match.group(1).strip()
-            if lunch_match:
-                recipes['lunch'] = lunch_match.group(1).strip()
-            if dinner_match:
-                recipes['dinner'] = dinner_match.group(1).strip()
-        
+
+        # Light normalization (do NOT strip # entirely)
+        cleaned = re.sub(r'[*_`]', '', meal_plan)
+
+        # Tolerant section matcher:
+        pattern = r'''
+            (?m)                    # multiline mode
+            (^|\n)                  # anchor
+            \s*                     # leading spaces
+            #{0,3}                  # optional markdown ### headers
+            \s*                     
+            (BREAKFAST|LUNCH|DINNER)   # section name
+            \s*                     # optional spaces
+            [:–\-]*                 # optional punctuation
+            \s*
+            \n                      # newline ends header
+            (.*?)                   # capture body (lazy)
+            (?=                     # --- LOOKAHEAD START ---
+                \n\s*#{0,3}\s*(?:BREAKFAST|LUNCH|DINNER)\b   # next header
+                | \Z                # OR end of string
+            )                       # --- LOOKAHEAD END ---
+        '''
+
+        matches = re.findall(pattern, cleaned, flags=re.IGNORECASE | re.DOTALL | re.VERBOSE)
+
+        # Store sections
+        for header, body, _ in matches:
+            recipes[header.lower()] = body.strip()
+
+        # Fallback heuristic if some sections are still empty
+        if any(not v for v in recipes.values()):
+            for meal in ['breakfast', 'lunch', 'dinner']:
+                if recipes[meal]:
+                    continue
+                # fallback search for line containing the word
+                simple = re.search(
+                    meal + r'.*?\n(.*?)(?=\n[A-Za-z ]*?:|\Z)',
+                    cleaned,
+                    re.IGNORECASE | re.DOTALL
+                )
+                if simple:
+                    recipes[meal] = simple.group(1).strip()
+
         return recipes
 
     def check_meal_plan_structure(self, meal_plan: str) -> Dict[str, any]:
@@ -98,7 +96,7 @@ class Validator:
         if missing:
             return {
                 'success': False,
-                'message': f'Missing meal(s): {", ".join(missing)}'
+                'message': f'Missing meal(s): {', '.join(missing)}'
             }
         
         return {
@@ -182,140 +180,166 @@ class Validator:
     
     def _parse_ingredients_from_recipe(self, recipe: str) -> List[Tuple[float, str, str]]:
         '''
-        Parse ingredients from a recipe string using the validation model.
-        Uses the model to extract and verify all ingredients exist in the recipe.
-        Returns list of tuples: (quantity, unit, name)
+        Extremely robust ingredient parser for LLM recipes.
+
+        Returns list of (qty: float, unit: str, ingredient_name: str).
+
+        Handles:
+        - '1 cup chopped onion'
+        - '½ cup rice'
+        - '200 g potatoes'
+        - '1 tbsp of olive oil'
+        - '2 eggs'
+        - '1 medium potato'
+        - 'about 2 tbsp sugar'
+        - '(optional)', '(approx 200 g)'
+        - Markdown bullets
         '''
-        # Use model to extract ingredients and verify they exist in the recipe
-        prompt = f'''Extract all ingredients from this recipe. Verify that each ingredient actually exists in the recipe text.
 
-            Recipe:
-            {recipe}
+        # --- 1. Extract section 3 cleanly ---
+        section_match = re.search(
+            r'3\.\s*(ingredients[^:\n]*:?)\s*(.*?)\n\s*4\.',
+            recipe,
+            flags=re.IGNORECASE | re.DOTALL
+        )
 
-            For each ingredient found, provide the quantity, unit, and name in this exact format (one per line):
-            QUANTITY|UNIT|INGREDIENT_NAME
+        if section_match:
+            ingredients_text = section_match.group(2).strip()
+        else:
+            # fallback: grab lines between any 'ingredients' and next numbered section
+            section_match = re.search(
+                r'(ingredients[^:\n]*)(.*?)(?=\n\s*\d+\.)',
+                recipe,
+                flags=re.IGNORECASE | re.DOTALL
+            )
+            ingredients_text = section_match.group(2).strip() if section_match else recipe
 
-            Example format:
-            0.5|cup|white rice
-            1|tbsp|sesame seeds
-            100|g|duck breast
+        # --- 2. Normalize Unicode fractions ---
+        FRACTIONS = {
+            '½': '1/2', '¼': '1/4', '¾': '3/4',
+            '⅓': '1/3', '⅔': '2/3',
+            '⅛': '1/8', '⅜': '3/8', '⅝': '5/8', '⅞': '7/8'
+        }
+        for sym, frac in FRACTIONS.items():
+            ingredients_text = ingredients_text.replace(sym, frac)
 
-            Return only the ingredient list in the format above, with no additional text.'''
-                    
-        try:
-            model_response = self.model.ask(prompt)
-        except Exception as e:
-            if self.verbose:
-                print(f'Error calling model for ingredient parsing: {e}')
-            return []
-        
+        # --- 3. Get candidate lines ---
+        raw_lines = ingredients_text.splitlines()
+        lines = []
+
+        for line in raw_lines:
+            clean = line.strip().lstrip('-•—–').strip()
+            if len(clean.split()) >= 2:
+                lines.append(clean)
+
         parsed = []
-        if not model_response or not model_response.strip():
-            if self.verbose:
-                print('Warning: Empty model response for ingredient parsing, trying fallback pattern matching')
-            # Fallback to basic pattern matching if model fails
-            return self._parse_ingredients_fallback(recipe)
-        
-        lines = model_response.strip().split('\n')
-        
+
+        # --- 4. Regex patterns for ingredient lines ---
+        patterns = [
+            # 1) Quantity + unit + name
+            r'^([0-9./]+)\s+([a-zA-Z]+)\s+(.+)$',
+
+            # 2) 'about 2 tbsp sugar'
+            r'^(?:about|approx\.?|~)\s*([0-9./]+)\s+([a-zA-Z]+)\s+(.+)$',
+
+            # 3) '200 g potatoes'
+            r'^([0-9./]+)\s*(g|kg|oz|lb|ml|l|tsp|tbsp)\s+(.+)$',
+
+            # 4) '1 cup of chopped onion'
+            r'^([0-9./]+)\s+([a-zA-Z]+)\s+of\s+(.+)$',
+
+            # 5) '2 eggs'
+            r'^([0-9./]+)\s+(egg[s]?)$',
+
+            # 6) '1 potato'
+            r'^([0-9./]+)\s+([A-Za-z][A-Za-z ]+?)$',
+        ]
+
+        def parse_qty(q):
+            if '/' in q:
+                try:
+                    a, b = q.split('/')
+                    return float(a) / float(b)
+                except:
+                    return None
+            try:
+                return float(q)
+            except:
+                return None
+
+        # --- 5. Try parsing each ingredient line ---
         for line in lines:
-            line = line.strip()
-            # Skip empty lines, comments, and headers
-            if not line or line.startswith('#') or line.lower().startswith('ingredient') and '|' not in line:
-                continue
-            
-            # Try to parse format: QUANTITY|UNIT|INGREDIENT_NAME
-            # Also handle variations like "QUANTITY | UNIT | INGREDIENT" with spaces
-            if '|' in line:
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) >= 3:
-                    try:
-                        qty_str = parts[0].strip()
-                        unit = parts[1].strip()
-                        name = parts[2].strip()
-                        
-                        # Convert quantity to float
-                        qty = self._parse_quantity(qty_str)
-                        if qty is not None and unit and name:
-                            parsed.append((qty, unit, name))
-                    except Exception as e:
-                        if self.verbose:
-                            print(f'Failed to parse ingredient line: {line}, error: {e}')
-                        continue
-            # Try alternative format: "QUANTITY UNIT INGREDIENT_NAME" (space-separated)
-            else:
-                # Try to parse space-separated format
-                words = line.split()
-                if len(words) >= 3:
-                    try:
-                        qty_str = words[0]
-                        unit = words[1]
-                        name = ' '.join(words[2:])
-                        qty = self._parse_quantity(qty_str)
-                        if qty is not None and unit and name:
-                            parsed.append((qty, unit, name))
-                    except Exception:
-                        pass
-        
-        # If we didn't parse anything, try fallback
-        if not parsed:
-            if self.verbose:
-                print('No ingredients parsed from model response, trying fallback pattern matching')
-            return self._parse_ingredients_fallback(recipe)
-        
+            cleaned = re.sub(r'\([^)]*\)', '', line)  # remove parentheses
+            cleaned = cleaned.replace(',', ' ').strip()
+
+            for pat in patterns:
+                m = re.match(pat, cleaned, flags=re.IGNORECASE)
+                if not m:
+                    continue
+
+                qty_str = m.group(1)
+                unit = m.group(2) if len(m.groups()) >= 2 else ''
+                name = m.group(3) if len(m.groups()) >= 3 else m.group(2)
+
+                qty = parse_qty(qty_str)
+                if qty is None:
+                    continue
+
+                unit = unit.lower().strip()
+                name = name.strip()
+                name = re.sub(r'(optional|to taste|as needed)$', '', name, flags=re.IGNORECASE).strip()
+
+                parsed.append((qty, unit, name))
+                break
+
         return parsed
+
     
     def _parse_ingredients_fallback(self, recipe: str) -> List[Tuple[float, str, str]]:
         '''
-        Fallback pattern matching approach if model-based parsing fails.
-        Returns list of tuples: (quantity, unit, name)
+        Very forgiving fallback parser.
+        Catches ANYTHING resembling '<qty> <unit> <name>'.
         '''
-        lines = recipe.splitlines()
-        in_ingredients = False
-        ingredient_lines = []
-        
-        for line in lines:
-            if line.lower().startswith('3. ingredients') or ('ingredients' in line.lower() and 'amount' in line.lower()):
-                in_ingredients = True
-                continue
-            if in_ingredients:
-                # Stop if we hit the next numbered section
-                if re.match(r'^\d+\.', line) and 'ingredients' not in line.lower():
-                    break
-                if line.strip():
-                    ingredient_lines.append(line.strip())
-        
+
+        text = recipe.lower()
+        lines = [l.strip(' -•\t') for l in text.splitlines()]
+
         parsed = []
-        for ing in ingredient_lines:
-            # Skip markdown table separators
-            if ing.startswith('|') and '---' in ing:
+
+        for line in lines:
+            # Skip empty or irrelevant lines
+            if not line or len(line.split()) < 2:
                 continue
-            
-            # Handle markdown table format: | Ingredient | Amount | Notes |
-            if ing.startswith('|') and ing.count('|') >= 3:
-                parts = [p.strip() for p in ing.split('|')]
-                if len(parts) >= 3:
-                    name = parts[1]  # Ingredient name
-                    amount = parts[2]  # Amount column
-                    # Parse amount like "½ cup (≈ 100 g)" or "1 Tbsp"
-                    amount_match = re.search(r'([0-9/½¼¾⅓⅔⅛⅜⅝⅞\.]+)\s*([a-zA-Z]+)', amount)
-                    if amount_match:
-                        qty_str = amount_match.group(1)
-                        unit = amount_match.group(2)
-                        qty = self._parse_quantity(qty_str)
-                        if qty is not None:
-                            parsed.append((qty, unit, name))
-                continue
-            
-            # Handle simple format: "2 cups flour" or "1/2 cup sugar"
-            m = re.match(r'([0-9/½¼¾⅓⅔⅛⅜⅝⅞\.]+)\s+(\w+)\s+(.*)', ing)
+
+            # Generic pattern: 'qty unit name'
+            m = re.match(
+                r'^([0-9./]+)\s+([a-zA-Z]+)\s+(.+)$',
+                line,
+                flags=re.IGNORECASE
+            )
             if m:
-                qty_str, unit, name = m.groups()
-                qty = self._parse_quantity(qty_str)
+                qty = self._parse_quantity(m.group(1))
+                unit = m.group(2)
+                name = m.group(3)
                 if qty is not None:
                     parsed.append((qty, unit, name))
-        
+                continue
+
+            # 'qty name' (2 eggs, 1 potato)
+            m = re.match(
+                r'^([0-9./]+)\s+([a-zA-Z][a-zA-Z ]+)$',
+                line
+            )
+            if m:
+                qty = self._parse_quantity(m.group(1))
+                unit = 'piece'
+                name = m.group(2)
+                if qty is not None:
+                    parsed.append((qty, unit, name))
+                continue
+
         return parsed
+
     
     def _parse_quantity(self, qty_str: str) -> float:
         '''
@@ -344,7 +368,7 @@ class Validator:
         elif '⅞' in qty_str or '7/8' in qty_str:
             return 7/8
         
-        # Handle fraction format like "1/2" or "3/4"
+        # Handle fraction format like '1/2' or '3/4'
         if '/' in qty_str:
             try:
                 num, den = qty_str.split('/')
@@ -433,131 +457,153 @@ class Validator:
 
     def _get_nutrients_from_fdc(self, ingredient_name: str) -> Dict[str, float]:
         '''
-        Query FDC API for nutrient data for an ingredient.
-        Returns dict with nutrient values per 100g.
-        Keys: 'calories', 'protein', 'fat', 'carbs', 'fiber'
-        Returns None values for missing nutrients.
+        Query FDC API safely using Foundation/SR data only.
+        Prevents 2000–5000 kcal/100g branded-item anomalies.
+        Returns None for any missing nutrient.
         '''
+
         if not self.fdc_api_key:
-            return {
-                'calories': None,
-                'protein': None,
-                'fat': None,
-                'carbs': None,
-                'fiber': None
-            }
-        
+            return {k: None for k in ['calories', 'protein', 'fat', 'carbs', 'fiber']}
+
         params = {
             'query': ingredient_name,
             'pageSize': 1,
-            'api_key': self.fdc_api_key
+            'dataType': ['Foundation', 'SR Legacy'],  # << SAFE
+            'api_key': self.fdc_api_key,
         }
-        
+
         try:
-            resp = requests.get('https://api.nal.usda.gov/fdc/v1/foods/search', params=params)
-            if resp.status_code != 200:
-                return {
-                    'calories': None,
-                    'protein': None,
-                    'fat': None,
-                    'carbs': None,
-                    'fiber': None
-                }
-            
+            resp = requests.get(
+                'https://api.nal.usda.gov/fdc/v1/foods/search', params=params
+            )
             data = resp.json()
             foods = data.get('foods', [])
             if not foods:
-                return {
-                    'calories': None,
-                    'protein': None,
-                    'fat': None,
-                    'carbs': None,
-                    'fiber': None
-                }
-            
-            food = foods[0]
-            nutrients = food.get('foodNutrients', [])
-            
-            # Initialize result dict
-            result = {
-                'calories': None,
-                'protein': None,
-                'fat': None,
-                'carbs': None,
-                'fiber': None
-            }
-            
-            # Extract nutrients by exact name matching
-            for nutrient in nutrients:
-                nutrient_name = nutrient.get('nutrientName', '')
-                unit_name = nutrient.get('unitName', '')
-                value = nutrient.get('value')
-                
-                if nutrient_name == 'Energy' and unit_name == 'KCAL':
-                    result['calories'] = value
-                elif nutrient_name == 'Protein':
-                    result['protein'] = value
-                elif nutrient_name == 'Total lipid (fat)':
-                    result['fat'] = value
-                elif nutrient_name == 'Carbohydrate, by difference':
-                    result['carbs'] = value
-                elif nutrient_name == 'Fiber, total dietary':
-                    result['fiber'] = value
-            
-            return result
-            
-        except Exception as e:
-            if self.verbose:
-                print(f'Error querying FDC API for {ingredient_name}: {e}')
-            return {
-                'calories': None,
-                'protein': None,
-                'fat': None,
-                'carbs': None,
-                'fiber': None
-            }
+                return {k: None for k in ['calories', 'protein', 'fat', 'carbs', 'fiber']}
 
-    def _convert_to_grams(self, qty: float, unit: str, ingredient_name: str, calories_per_100g: float = None) -> float:
-        '''
-        Convert quantity and unit to grams.
-        First tries standard conversion, then uses model if needed.
-        Returns grams or None if conversion fails.
-        '''
-        # Try standard conversion first
-        grams_per_unit = self._get_standard_conversion(unit, ingredient_name)
-        if grams_per_unit is not None:
-            return qty * grams_per_unit
-        
-        # If standard conversion unavailable, use model
-        if calories_per_100g is None:
-            # Try to get calories first to help model
-            nutrients = self._get_nutrients_from_fdc(ingredient_name)
-            calories_per_100g = nutrients.get('calories')
-        
-        prompt = f'''Convert {qty} {unit} of {ingredient_name} to grams.
-The ingredient has {calories_per_100g} calories per 100g (if available).
-Show your reasoning, then provide the answer in this exact format:
-Total grams: XX g
+            nutrients = foods[0].get('foodNutrients', [])
 
-Only provide the final answer line, nothing else.'''
-        
-        try:
-            model_response = self.model.ask(prompt)
-            
-            # Parse response for "Total grams: XX g"
-            match = re.search(r'Total grams:\s*([\d.]+)\s*g', model_response, re.IGNORECASE)
-            if match:
-                return float(match.group(1))
-            else:
-                # Try to extract just a number followed by 'g'
-                match = re.search(r'([\d.]+)\s*g', model_response)
-                if match:
-                    return float(match.group(1))
-                return None
-        except Exception as e:
-            if self.verbose:
-                print(f'Error in model conversion for {qty} {unit} {ingredient_name}: {e}')
+            out = {'calories': None, 'protein': None, 'fat': None, 'carbs': None, 'fiber': None}
+
+            for n in nutrients:
+                name = n.get('nutrientName', '')
+                val = n.get('value', None)
+
+                if name == 'Energy' and n.get('unitName') == 'KCAL':
+                    out['calories'] = val
+                elif name == 'Protein':
+                    out['protein'] = val
+                elif name == 'Total lipid (fat)':
+                    out['fat'] = val
+                elif name == 'Carbohydrate, by difference':
+                    out['carbs'] = val
+                elif name == 'Fiber, total dietary':
+                    out['fiber'] = val
+
+            return out
+
+        except Exception:
+            return {k: None for k in ['calories', 'protein', 'fat', 'carbs', 'fiber']}
+
+
+    def _lookup_density(self, ingredient_name: str):
+        '''
+        Returns grams per 1 cup for the ingredient.
+        Densities are APPROXIMATE but stable and prevent wild errors.
+        '''
+        name = ingredient_name.lower()
+
+        DENSITIES = {
+            # Common cooking ingredients
+            'water': 240,
+            'milk': 245,
+            'broth': 240,
+            'oil': 220,
+            'olive oil': 220,
+            'butter': 227,
+            'flour': 120,
+            'oat flour': 92,
+            'rice': 195,
+            'sugar': 200,
+            'honey': 340,
+            'maple syrup': 322,
+            'salt': 292,
+            'quinoa': 185,
+            'potato': 150,
+            'carrot': 128,
+            'duck': 145,
+            'egg': 50,       # per medium egg
+            'avocado': 150,
+            'spinach': 30,
+            'kale': 70,
+            'onion': 160,
+            'pepper': 120,
+            'tomato': 180
+        }
+
+        # Match by substring (so 'diced onion' works)
+        for key, density in DENSITIES.items():
+            if key in name:
+                return density
+
+        return None
+
+
+    def _convert_to_grams(self, qty: float, unit: str, ingredient_name: str) -> float:
+        '''
+        Convert qty+unit into grams safely.
+        Returns None if conversion cannot be trusted.
+        '''
+
+        unit = unit.lower().strip()
+
+        # Direct grams
+        if unit in ('g', 'gram', 'grams'):
+            return qty
+
+        if unit in ('kg', 'kilogram', 'kilograms'):
+            return qty * 1000
+
+        # Volume measures — need density OR fallback density table
+        VOLUME_UNITS_ML = {
+            'ml': 1,
+            'milliliter': 1,
+            'milliliters': 1,
+            'l': 1000,
+            'liter': 1000,
+            'liters': 1000,
+            'tsp': 5,
+            'teaspoon': 5,
+            'tbsp': 15,
+            'tablespoon': 15,
+            'cup': 240,
+            'cups': 240,
+        }
+
+        # If unit is a volume measure
+        if unit in VOLUME_UNITS_ML:
+            ml = qty * VOLUME_UNITS_ML[unit]
+
+            # Lookup ingredient density
+            density_g_per_cup = self._lookup_density(ingredient_name)
+            if density_g_per_cup:
+                g_per_ml = density_g_per_cup / 240
+                return ml * g_per_ml
+
+            # Unknown density → refuse to estimate
             return None
+
+        # Pieces (eggs, shrimp, potatoes)
+        if unit in ('piece', 'pieces', 'item', 'items'):
+            density = self._lookup_density(ingredient_name)
+            if density:
+                # treat '1 piece' as roughly 1/2 cup unless known
+                return qty * (density * 0.5)
+            return None
+
+        # Fallback: unit not recognized
+        return None
+
 
     def _extract_nutritional_info(self, recipe: str) -> Dict[str, float]:
         '''
@@ -671,7 +717,7 @@ Only provide the final answer line, nothing else.'''
             Carbohydrates: XX g
             Fiber: XX g
 
-            If a value is not found, write "N/A" for that line.'''
+            If a value is not found, write 'N/A' for that line.'''
             
             try:
                 model_response = self.model.ask(prompt)
@@ -705,54 +751,47 @@ Only provide the final answer line, nothing else.'''
         
         return result
 
-    def _calculate_nutrition_for_recipe(self, recipe: str) -> Tuple[Dict[str, float], List[str]]:
+    def _calculate_nutrition_for_recipe(self, recipe: str):
         '''
-        Calculate total nutrition (calories, protein, fat, carbs, fiber) for a single recipe.
-        Returns (nutrition_dict, missing_ingredients_list)
-        nutrition_dict has keys: 'calories', 'protein', 'fat', 'carbs', 'fiber'
+        Compute nutrition safely.
+        Skips ingredients with unknown units or densities.
+        Meal is only considered valid if >=70% of ingredients were computable.
         '''
+
         ingredients = self._parse_ingredients_from_recipe(recipe)
-        if not ingredients:
-            return ({
-                'calories': 0.0,
-                'protein': 0.0,
-                'fat': 0.0,
-                'carbs': 0.0,
-                'fiber': 0.0
-            }, ['Could not parse ingredient list'])
-        
-        # Initialize totals
-        nutrition_totals = {
-            'calories': 0.0,
-            'protein': 0.0,
-            'fat': 0.0,
-            'carbs': 0.0,
-            'fiber': 0.0
-        }
-        missing_ingredients = []
-        
+
+        totals = {'calories': 0, 'protein': 0, 'fat': 0, 'carbs': 0, 'fiber': 0}
+        missing = []
+        processed_count = 0
+
         for qty, unit, name in ingredients:
-            # Query FDC API for nutrients per 100g
-            nutrients_per_100g = self._get_nutrients_from_fdc(name)
-            
-            # Check if we got at least calories
-            if nutrients_per_100g['calories'] is None:
-                missing_ingredients.append(name)
+
+            # Get USDA nutrients
+            nutrients = self._get_nutrients_from_fdc(name)
+            if nutrients['calories'] is None:
+                missing.append(f'{name} (no USDA match)')
                 continue
-            
-            # Convert quantity to grams
-            grams = self._convert_to_grams(qty, unit, name, nutrients_per_100g['calories'])
+
+            # Convert to grams
+            grams = self._convert_to_grams(qty, unit, name)
             if grams is None:
-                missing_ingredients.append(f'{name} (unit {unit} - conversion failed)')
+                missing.append(f'{name} (unit \'{unit}\' not convertible)')
                 continue
-            
-            # Calculate nutrients: (nutrient_per_100g / 100) * grams
-            for nutrient_key in nutrition_totals.keys():
-                nutrient_value = nutrients_per_100g.get(nutrient_key)
-                if nutrient_value is not None:
-                    nutrition_totals[nutrient_key] += (nutrient_value / 100.0) * grams
-        
-        return (nutrition_totals, missing_ingredients)
+
+            processed_count += 1
+
+            # Add nutrient totals
+            factor = grams / 100.0
+            for key in totals:
+                if nutrients[key] is not None:
+                    totals[key] += nutrients[key] * factor
+
+        # Require at least 70% of ingredients to be computable
+        if processed_count < max(1, int(len(ingredients) * 0.7)):
+            return ({'calories': 0, 'protein': 0, 'fat': 0, 'carbs': 0, 'fiber': 0}, missing)
+
+        return (totals, missing)
+
 
     def check_nutrition(self, meal_plan: str) -> Dict[str, any]:
         '''
@@ -771,7 +810,7 @@ Only provide the final answer line, nothing else.'''
         }
         all_missing = []
         calorie_issues = []
-        caloric_mismatches = []
+        nutrition_mismatches = []
         tolerance = 0.1  # 10% tolerance
         
         for meal_type, recipe in recipes.items():
@@ -792,36 +831,36 @@ Only provide the final answer line, nothing else.'''
             # Extract stated nutrition from section 5
             stated_nutrition = self._extract_nutritional_info(recipe)
             
-            # Compare calculated vs stated - check calories for mismatches, but report all as info
-            # First, check calories for tolerance mismatches
-            calculated_calories = calculated_nutrition.get('calories', 0.0)
-            stated_calories = stated_nutrition.get('calories')
-            
-            if stated_calories is not None:
-                # Calculate tolerance range for calories only
-                lower_bound = stated_calories * (1 - tolerance)
-                upper_bound = stated_calories * (1 + tolerance)
+            # Compare calculated vs stated with tolerance
+            for nutrient_key in ['calories', 'protein', 'fat', 'carbs', 'fiber']:
+                calculated = calculated_nutrition.get(nutrient_key, 0.0)
+                stated = stated_nutrition.get(nutrient_key)
                 
-                # Calculate difference percentage (used in both cases)
-                diff_percent = abs((calculated_calories - stated_calories) / stated_calories * 100) if stated_calories > 0 else 0
-                
-                # Check if calculated calories are within tolerance
-                is_within_tolerance = lower_bound <= calculated_calories <= upper_bound
-                
-                # Build message - always report, but indicate if it exceeds tolerance
-                if is_within_tolerance:
-                    message = f'{meal_type.capitalize()}: Calories calculated {calculated_calories:.1f} kcal, stated {stated_calories:.1f} kcal ({diff_percent:.1f}% difference)'
-                else:
-                    message = f'{meal_type.capitalize()}: Calculated calories {calculated_calories:.1f} kcal, stated {stated_calories:.1f} kcal ({diff_percent:.1f}% difference exceeds {tolerance*100:.0f}% tolerance)'
-                
-                caloric_mismatches.append(message)
+                if stated is not None:
+                    # Calculate tolerance range
+                    if nutrient_key == 'calories':
+                        lower_bound = stated * (0.7 - tolerance)
+                    else:
+                        lower_bound = stated * (1 - tolerance)
+                    upper_bound = stated * (1 + tolerance)
+                    
+                    # Check if calculated is within tolerance
+                    if calculated < lower_bound or calculated > upper_bound:
+                        diff_percent = abs((calculated - stated) / stated * 100) if stated > 0 else 0
+                        nutrient_name = nutrient_key.capitalize()
+                        if nutrient_key == 'carbs':
+                            nutrient_name = 'Carbohydrates'
+                        nutrition_mismatches.append(
+                            f'{meal_type.capitalize()}: Calculated {nutrient_name.lower()} {calculated:.1f} {self._get_nutrient_unit(nutrient_key)}, '
+                            f'stated {stated:.1f} {self._get_nutrient_unit(nutrient_key)} ({diff_percent:.1f}% difference exceeds {tolerance*100:.0f}% tolerance)'
+                        )
         
         # Check if we were able to calculate nutrition for at least one meal
         # If all meals have missing ingredients or no meals were processed, that's a failure
         if all_missing and not meal_nutrition:
             return {
                 'success': False,
-                'message': f'Could not compute nutrition for any meals. Missing ingredients: {", ".join(all_missing)}'
+                'message': f'Could not compute nutrition for any meals. Missing ingredients: {', '.join(all_missing)}'
             }
         
         # If some meals have missing ingredients but we calculated others, continue
@@ -839,9 +878,10 @@ Only provide the final answer line, nothing else.'''
         
         if min_total_cal is not None:
             if total_nutrition['calories'] < min_total_cal:
-                calorie_issues.append(f'Total calories {total_nutrition["calories"]:.1f} kcal below minimum of {min_total_cal:.1f} kcal')
+                calorie_issues.append(f'Total calories {total_nutrition['calories']:.1f} kcal below minimum of {min_total_cal:.1f} kcal')
+        if max_total_cal is not None:
             if total_nutrition['calories'] > max_total_cal:
-                calorie_issues.append(f'Total calories {total_nutrition["calories"]:.1f} kcal exceeds maximum of {max_total_cal:.1f} kcal')
+                calorie_issues.append(f'Total calories {total_nutrition['calories']:.1f} kcal exceeds maximum of {max_total_cal:.1f} kcal')
         
         # Create nutritional summary (informational)
         # Process in consistent order: breakfast, lunch, dinner
@@ -850,30 +890,33 @@ Only provide the final answer line, nothing else.'''
             if meal_type in meal_nutrition:
                 nutrition = meal_nutrition[meal_type]
                 per_meal_summary.append(
-                    f'{meal_type.capitalize()}: {nutrition["calories"]:.1f} kcal, '
-                    f'{nutrition["protein"]:.1f}g protein, {nutrition["fat"]:.1f}g fat, '
-                    f'{nutrition["carbs"]:.1f}g carbs, {nutrition["fiber"]:.1f}g fiber'
+                    f'{meal_type.capitalize()}: {nutrition['calories']:.1f} kcal, '
+                    f'{nutrition['protein']:.1f}g protein, {nutrition['fat']:.1f}g fat, '
+                    f'{nutrition['carbs']:.1f}g carbs, {nutrition['fiber']:.1f}g fiber'
                 )
+        
         total_summary = (
-            f'Total: {total_nutrition["calories"]:.1f} kcal, '
-            f'{total_nutrition["protein"]:.1f}g protein, {total_nutrition["fat"]:.1f}g fat, '
-            f'{total_nutrition["carbs"]:.1f}g carbs, {total_nutrition["fiber"]:.1f}g fiber'
+            f'Total: {total_nutrition['calories']:.1f} kcal, '
+            f'{total_nutrition['protein']:.1f}g protein, {total_nutrition['fat']:.1f}g fat, '
+            f'{total_nutrition['carbs']:.1f}g carbs, {total_nutrition['fiber']:.1f}g fiber'
         )
+        
         nutrition_info = ' | '.join(per_meal_summary) + ' | ' + total_summary
+        
         # Build message with nutritional info and any issues
-        message_parts = [f'Calculated nutritional information: {nutrition_info}']
+        message_parts = [f'Nutritional information: {nutrition_info}']
         
         # Add missing ingredients information (if any)
         if all_missing:
-            message_parts.append(f'Warning: Could not compute nutrition for some ingredients: {", ".join(all_missing)}. Calculated values may be incomplete.')
+            message_parts.append(f'Warning: Could not compute nutrition for some ingredients: {', '.join(all_missing)}. Calculated values may be incomplete.')
         
         # Add nutrition mismatches (to ask model to update stated values)
-        if caloric_mismatches:
-            message_parts.append(f'Please update the recipe because the calories are not near the target: {" | ".join(caloric_mismatches)}')
+        if nutrition_mismatches:
+            message_parts.append(f'Please update the nutritional information in section 5 to match calculated values: {' | '.join(nutrition_mismatches)}')
         
         # Add calorie issues (to ask model to adjust recipes)
         if calorie_issues:
-            message_parts.append(f'Please adjust the recipes to meet calorie requirements: {" | ".join(calorie_issues)}')
+            message_parts.append(f'Please adjust the recipes to meet calorie requirements: {' | '.join(calorie_issues)}')
         
         # Success is based on:
         # 1. Calories being in range (if target specified)
@@ -882,6 +925,7 @@ Only provide the final answer line, nothing else.'''
         # If we have missing ingredients but calculated some nutrition, it's a partial success
         # Only fail if we have critical missing ingredients that prevent all calculations
         has_critical_missing = all_missing and not meal_nutrition
+        
         return {
             'success': not has_calorie_issues and not has_critical_missing,
             'message': '. '.join(message_parts)
@@ -928,7 +972,7 @@ Only provide the final answer line, nothing else.'''
         for qty, unit, name, meal_type in all_ingredients:
             ingredient_summary.append(f'{qty} {unit} {name} ({meal_type})')
         
-        prompt = f'''Estimate the approximate total cost in USD for ALL these ingredients used across the three recipes: {", ".join(ingredient_summary)}. This includes all ingredients listed in the recipes, not just the main ingredients. Consider typical grocery store prices. Return only a number representing the total cost in USD, no other text.'''
+        prompt = f'''Estimate the approximate total cost in USD for ALL these ingredients used across the three recipes: {', '.join(ingredient_summary)}. This includes all ingredients listed in the recipes, not just the main ingredients. Consider typical grocery store prices. Return only a number representing the total cost in USD, no other text.'''
         
         model_response = self.model.ask(prompt)
         if self.verbose:
@@ -969,7 +1013,7 @@ Only provide the final answer line, nothing else.'''
         if not structure_check['success']:
             # If structure is wrong, can't proceed with other checks
             if self.verbose:
-                print(f"Validation error: {structure_check['message']}")
+                print(f'Validation error: {structure_check['message']}')
             return {
                 'success': False,
                 'message': structure_check['message']
@@ -1009,11 +1053,11 @@ Only provide the final answer line, nothing else.'''
         all_messages = [r['message'] for r in all_results]
         
         if self.verbose:
-            print("=== Validation Results ===")
+            print('=== Validation Results ===')
             for result in all_results:
-                status = "✓" if result['success'] else "✗"
-                print(f"{status} {result['message']}")
-            print("=========================")
+                status = '✓' if result['success'] else '✗'
+                print(f'{status} {result['message']}')
+            print('=========================')
         
         final_message = ' | '.join(all_messages) if all_messages else 'All checks passed'
         

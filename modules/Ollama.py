@@ -22,18 +22,102 @@ class OllamaChatSession:
         if system_prompt:
             self.messages.append({'role': 'system', 'content': system_prompt})
 
-    def initial_request(self, args:dict) -> str: 
-        ingredients = f'Create a meal plan with these ingredients: {args.ingredients}. All ingredients must be used across the three meals (breakfast, lunch, and dinner), but the recipes should be diverse and different from each other.'
-        allergens = f'Note to avoid these allergens: {args.allergens}.' if args.allergens else ''
-        format = 'Put each recipe in this format: 1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
-        meal_plan_format = 'Structure the meal plan as follows: BREAKFAST: [recipe format] LUNCH: [recipe format] DINNER: [recipe format]'
-        budget = f'Make sure to stay under the budget of ${args.budget} if possible. If not, indicate so.' if getattr(args, 'budget', None) else ''
-        calories = f'Return the projected calories and aim for {args.calories}. Indicate if over or under the projection.' if getattr(args, 'calories', None) else ''
+    def get_initial_user_message(self):
+        for msg in self.messages:
+            if msg["role"] == "user":
+                return msg["content"]
+        return ""
 
-        prompt = f"""{ingredients} {meal_plan_format} {format} {allergens} {budget} {calories}"""
+    def initial_request(self, args: dict) -> str:
+        """
+        Generate the initial meal plan request with a strict template
+        so the model always outputs BREAKFAST, LUNCH, and DINNER clearly.
+        """
+
+        ingredients = (
+            f"You must create a meal plan using ALL of these ingredients "
+            f"at least once across the three meals: {args.ingredients}."
+        )
+
+        allergens = (
+            f"These allergens must be strictly avoided: {args.allergens}."
+            if args.allergens
+            else "There are no allergens to avoid."
+        )
+
+        calories = (
+            f"The entire meal plan should total approximately {args.calories} calories "
+            f"(±10% tolerance)."
+            if getattr(args, "calories", None)
+            else ""
+        )
+
+        budget = (
+            f"The total ingredient cost must stay under ${args.budget}."
+            if getattr(args, "budget", None)
+            else ""
+        )
+
+        # 🔥 STRICT STRUCTURE TEMPLATE — models follow this reliably
+        structure = """
+    You MUST output your response using EXACTLY the following structure:
+
+    ## BREAKFAST
+    1. Title
+    2. Serving size
+    3. Ingredients and amounts
+    4. Instructions
+    5. Nutritional information
+    6. Anything else
+
+    ## LUNCH
+    1. Title
+    2. Serving size
+    3. Ingredients and amounts
+    4. Instructions
+    5. Nutritional information
+    6. Anything else
+
+    ## DINNER
+    1. Title
+    2. Serving size
+    3. Ingredients and amounts
+    4. Instructions
+    5. Nutritional information
+    6. Anything else
+
+    Do NOT add extra sections.
+    Do NOT change the section numbers.
+    Do NOT change the section titles.
+    """
+
+        prompt = f"""
+    Your task is to generate a full 3-meal daily meal plan.
+
+    {ingredients}
+    {allergens}
+    {calories}
+    {budget}
+
+    Each meal must follow this recipe schema:
+    1. Title
+    2. Serving size
+    3. Ingredients and amounts
+    4. Instructions
+    5. Nutritional information
+    6. Anything else
+
+    {structure}
+
+    Use ALL required ingredients across the three meals.
+    Return ONLY the structured meal plan — no commentary before or after.
+    """
+
         if self.verbosity:
-            print(f'Prompt: {prompt}')
+            print(f"Prompt: {prompt}")
+
         return self.ask(prompt)
+
     
     def request(self, validation:str) -> str: 
         '''request from validator, has additional information'''
