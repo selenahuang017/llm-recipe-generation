@@ -96,7 +96,7 @@ class Validator:
         if missing:
             return {
                 'success': False,
-                'message': f'Missing meal(s): {', '.join(missing)}'
+                'message': f'Missing meal(s): {", ".join(missing)}'
             }
         
         return {
@@ -106,7 +106,7 @@ class Validator:
 
     def check_sections(self, recipe: str, meal_type: str = '') -> Dict[str, any]:
         format = '1. Title, 2. Serving size, 3. Ingredients and amounts, 4. Instructions, 5. Nutritional information, 6. Anything else.'
-        prompt = f'''Check if this recipe {recipe} is in this format: {format}.\nReturn only the string 'True' if correct, else return only the missing sections.'''
+        prompt = f'''Check if this recipe {recipe} is in this format: {format}.\nReturn only the string "True" if correct, else return only the missing sections.'''
         
         response = self.model.ask(prompt)
         if self.verbose:
@@ -132,7 +132,7 @@ class Validator:
         ingredients = self.args.ingredients
         
         # Check if all ingredients appear at least once across the meal plan
-        prompt = f'''Check if this meal plan includes ALL of these ingredients at least once: {ingredients}. Each ingredient must appear in at least one of the three recipes (breakfast, lunch, or dinner). An ingredient does not need to appear in all three recipes, but it must appear in at least one recipe somewhere in the meal plan.\nReturn only the string 'True' if all ingredients are present at least once somewhere in the meal plan, else return only the missing ingredients.'''
+        prompt = f'''Check if this meal plan includes ALL of these ingredients at least once: {ingredients}. Each ingredient must appear in at least one of the three recipes (breakfast, lunch, or dinner). An ingredient does not need to appear in all three recipes, but it must appear in at least one recipe somewhere in the meal plan.\nReturn only the string "True" if all ingredients are present at least once somewhere in the meal plan, else return only the missing ingredients.'''
         
         model_response = self.model.ask(prompt + ' Meal plan: ' + meal_plan)
         if self.verbose:
@@ -161,7 +161,7 @@ class Validator:
                 'message': f'{meal_type.capitalize()}: No allergens specified' if meal_type else 'No allergens specified'
             }
 
-        prompt = f'''Check if any of the ingredients in this recipe contain or are related to these allergens: {allergens}. Analyze the ingredients list carefully.\nReturn only the string 'True' if no allergens are present, else return the allergen(s) found.'''
+        prompt = f'''Check if any of the ingredients in this recipe contain or are related to these allergens: {allergens}. Analyze the ingredients list carefully.\nReturn only the string "True" if no allergens are present, else return the allergen(s) found.'''
         
         model_response = self.model.ask(prompt + ' Recipe: ' + recipe)
         if self.verbose:
@@ -717,7 +717,7 @@ class Validator:
             Carbohydrates: XX g
             Fiber: XX g
 
-            If a value is not found, write 'N/A' for that line.'''
+            If a value is not found, write "N/A" for that line.'''
             
             try:
                 model_response = self.model.ask(prompt)
@@ -775,7 +775,7 @@ class Validator:
             # Convert to grams
             grams = self._convert_to_grams(qty, unit, name)
             if grams is None:
-                missing.append(f'{name} (unit \'{unit}\' not convertible)')
+                missing.append(f'{name} (unit "{unit}" not convertible)')
                 continue
 
             processed_count += 1
@@ -810,7 +810,7 @@ class Validator:
         }
         all_missing = []
         calorie_issues = []
-        nutrition_mismatches = []
+        caloric_mismatches = []
         tolerance = 0.1  # 10% tolerance
         
         for meal_type, recipe in recipes.items():
@@ -831,42 +831,42 @@ class Validator:
             # Extract stated nutrition from section 5
             stated_nutrition = self._extract_nutritional_info(recipe)
             
-            # Compare calculated vs stated with tolerance
-            for nutrient_key in ['calories', 'protein', 'fat', 'carbs', 'fiber']:
-                calculated = calculated_nutrition.get(nutrient_key, 0.0)
-                stated = stated_nutrition.get(nutrient_key)
+            # Compare calculated vs stated - check calories for mismatches, but report all as info
+            # First, check calories for tolerance mismatches
+            calculated_calories = calculated_nutrition.get('calories', 0.0)
+            stated_calories = stated_nutrition.get('calories')
+            
+            if stated_calories is not None:
+                # Calculate tolerance range for calories only
+                lower_bound = stated_calories * (1 - tolerance)
+                upper_bound = stated_calories * (1 + tolerance)
                 
-                if stated is not None:
-                    # Calculate tolerance range
-                    if nutrient_key == 'calories':
-                        lower_bound = stated * (0.7 - tolerance)
-                    else:
-                        lower_bound = stated * (1 - tolerance)
-                    upper_bound = stated * (1 + tolerance)
-                    
-                    # Check if calculated is within tolerance
-                    if calculated < lower_bound or calculated > upper_bound:
-                        diff_percent = abs((calculated - stated) / stated * 100) if stated > 0 else 0
-                        nutrient_name = nutrient_key.capitalize()
-                        if nutrient_key == 'carbs':
-                            nutrient_name = 'Carbohydrates'
-                        nutrition_mismatches.append(
-                            f'{meal_type.capitalize()}: Calculated {nutrient_name.lower()} {calculated:.1f} {self._get_nutrient_unit(nutrient_key)}, '
-                            f'stated {stated:.1f} {self._get_nutrient_unit(nutrient_key)} ({diff_percent:.1f}% difference exceeds {tolerance*100:.0f}% tolerance)'
-                        )
+                # Calculate difference percentage (used in both cases)
+                diff_percent = abs((calculated_calories - stated_calories) / stated_calories * 100) if stated_calories > 0 else 0
+                
+                # Check if calculated calories are within tolerance
+                is_within_tolerance = lower_bound <= calculated_calories <= upper_bound
+                
+                # Build message - always report, but indicate if it exceeds tolerance
+                if is_within_tolerance:
+                    message = f'{meal_type.capitalize()}: Calories calculated {calculated_calories:.1f} kcal, stated {stated_calories:.1f} kcal ({diff_percent:.1f}% difference)'
+                else:
+                    message = f'{meal_type.capitalize()}: Calculated calories {calculated_calories:.1f} kcal, stated {stated_calories:.1f} kcal ({diff_percent:.1f}% difference EXCEEDS {tolerance*100:.0f}% tolerance)'
+                
+                caloric_mismatches.append(message)
         
         # Check if we were able to calculate nutrition for at least one meal
         # If all meals have missing ingredients or no meals were processed, that's a failure
         if all_missing and not meal_nutrition:
             return {
                 'success': False,
-                'message': f'Could not compute nutrition for any meals. Missing ingredients: {', '.join(all_missing)}'
+                'message': f'Could not compute nutrition for any meals. Missing ingredients: {", ".join(all_missing)}'
             }
         
         # If some meals have missing ingredients but we calculated others, continue
         # but include the missing ingredients in the message
 
-        # Check total calories limits (both min and max)
+        # Check TOTAL calories limits (both min and max)
         # If --calories is set, calculate min/max with ±10% tolerance
         target_calories = getattr(self.args, 'calories', None)
         if target_calories is not None:
@@ -878,10 +878,10 @@ class Validator:
         
         if min_total_cal is not None:
             if total_nutrition['calories'] < min_total_cal:
-                calorie_issues.append(f'Total calories {total_nutrition['calories']:.1f} kcal below minimum of {min_total_cal:.1f} kcal')
+                calorie_issues.append(f'Total calories {total_nutrition["calories"]:.1f} kcal below minimum of {min_total_cal:.1f} kcal')
         if max_total_cal is not None:
             if total_nutrition['calories'] > max_total_cal:
-                calorie_issues.append(f'Total calories {total_nutrition['calories']:.1f} kcal exceeds maximum of {max_total_cal:.1f} kcal')
+                calorie_issues.append(f'Total calories {total_nutrition["calories"]:.1f} kcal exceeds maximum of {max_total_cal:.1f} kcal')
         
         # Create nutritional summary (informational)
         # Process in consistent order: breakfast, lunch, dinner
@@ -890,15 +890,15 @@ class Validator:
             if meal_type in meal_nutrition:
                 nutrition = meal_nutrition[meal_type]
                 per_meal_summary.append(
-                    f'{meal_type.capitalize()}: {nutrition['calories']:.1f} kcal, '
-                    f'{nutrition['protein']:.1f}g protein, {nutrition['fat']:.1f}g fat, '
-                    f'{nutrition['carbs']:.1f}g carbs, {nutrition['fiber']:.1f}g fiber'
+                    f'{meal_type.capitalize()}: {nutrition["calories"]:.1f} kcal, '
+                    f'{nutrition["protein"]:.1f}g protein, {nutrition["fat"]:.1f}g fat, '
+                    f'{nutrition["carbs"]:.1f}g carbs, {nutrition["fiber"]:.1f}g fiber'
                 )
         
         total_summary = (
-            f'Total: {total_nutrition['calories']:.1f} kcal, '
-            f'{total_nutrition['protein']:.1f}g protein, {total_nutrition['fat']:.1f}g fat, '
-            f'{total_nutrition['carbs']:.1f}g carbs, {total_nutrition['fiber']:.1f}g fiber'
+            f'Total: {total_nutrition["calories"]:.1f} kcal, '
+            f'{total_nutrition["protein"]:.1f}g protein, {total_nutrition["fat"]:.1f}g fat, '
+            f'{total_nutrition["carbs"]:.1f}g carbs, {total_nutrition["fiber"]:.1f}g fiber'
         )
         
         nutrition_info = ' | '.join(per_meal_summary) + ' | ' + total_summary
@@ -908,15 +908,15 @@ class Validator:
         
         # Add missing ingredients information (if any)
         if all_missing:
-            message_parts.append(f'Warning: Could not compute nutrition for some ingredients: {', '.join(all_missing)}. Calculated values may be incomplete.')
+            message_parts.append(f'Warning: Could not compute nutrition for some ingredients: {", ".join(all_missing)}. Calculated values may be incomplete.')
         
         # Add nutrition mismatches (to ask model to update stated values)
-        if nutrition_mismatches:
-            message_parts.append(f'Please update the nutritional information in section 5 to match calculated values: {' | '.join(nutrition_mismatches)}')
+        if caloric_mismatches:
+            message_parts.append(f'Please update the recipe because the calories are not near the target: {" | ".join(caloric_mismatches)}')
         
         # Add calorie issues (to ask model to adjust recipes)
         if calorie_issues:
-            message_parts.append(f'Please adjust the recipes to meet calorie requirements: {' | '.join(calorie_issues)}')
+            message_parts.append(f'Please adjust the recipes to meet calorie requirements: {" | ".join(calorie_issues)}')
         
         # Success is based on:
         # 1. Calories being in range (if target specified)
@@ -972,7 +972,7 @@ class Validator:
         for qty, unit, name, meal_type in all_ingredients:
             ingredient_summary.append(f'{qty} {unit} {name} ({meal_type})')
         
-        prompt = f'''Estimate the approximate total cost in USD for ALL these ingredients used across the three recipes: {', '.join(ingredient_summary)}. This includes all ingredients listed in the recipes, not just the main ingredients. Consider typical grocery store prices. Return only a number representing the total cost in USD, no other text.'''
+        prompt = f'''Estimate the approximate total cost in USD for ALL these ingredients used across the three recipes: {", ".join(ingredient_summary)}. This includes all ingredients listed in the recipes, not just the main ingredients. Consider typical grocery store prices. Return only a number representing the total cost in USD, no other text.'''
         
         model_response = self.model.ask(prompt)
         if self.verbose:
@@ -1013,7 +1013,7 @@ class Validator:
         if not structure_check['success']:
             # If structure is wrong, can't proceed with other checks
             if self.verbose:
-                print(f'Validation error: {structure_check['message']}')
+                print(f'Validation error: {structure_check["message"]}')
             return {
                 'success': False,
                 'message': structure_check['message']
@@ -1056,7 +1056,7 @@ class Validator:
             print('=== Validation Results ===')
             for result in all_results:
                 status = '✓' if result['success'] else '✗'
-                print(f'{status} {result['message']}')
+                print(f'{status} {result["message"]}')
             print('=========================')
         
         final_message = ' | '.join(all_messages) if all_messages else 'All checks passed'

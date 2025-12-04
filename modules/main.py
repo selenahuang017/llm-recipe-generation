@@ -108,9 +108,6 @@ def generate_meal_plan(args):
     # Initial generation
     meal_plan = session.initial_request(args)
 
-    if args.verbose:
-        print(f'\nResponse:{meal_plan}')
-
     iteration_history = [meal_plan]
     iterations_taken = 0
     validation_result = None
@@ -119,6 +116,8 @@ def generate_meal_plan(args):
     original_instruction = session.get_initial_user_message()
 
     for i in range(args.max_iterations):
+        if args.verbose:
+            print(f'\Current meal plan:{meal_plan}\n')
         iterations_taken = i + 1
 
         if args.verbose:
@@ -139,21 +138,21 @@ def generate_meal_plan(args):
 
         # Construct the targeted-repair retry prompt
         retry_prompt = f"""
-Your previous meal plan was invalid for the following reason(s):
-{validation_result['message']}
+            Your previous meal plan was invalid for the following reason(s):
+            {validation_result['message']}
 
-You must generate a **brand new** meal plan from scratch.
+            You must generate a **brand new** meal plan from scratch.
 
-Follow these rules exactly:
-{original_instruction}
+            Follow these rules exactly:
+            {original_instruction}
 
-Do NOT summarize.
-Do NOT reference the previous attempt.
-Output the full meal plan again with clearly labeled sections:
-BREAKFAST
-LUNCH
-DINNER
-"""
+            Do NOT summarize.
+            Do NOT reference the previous attempt.
+            Output the full meal plan again with clearly labeled sections:
+            BREAKFAST
+            LUNCH
+            DINNER
+            """
 
         # Ask the model to repair only the failed portions
         meal_plan = session.request(retry_prompt)
