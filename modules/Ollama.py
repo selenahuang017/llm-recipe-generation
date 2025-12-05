@@ -46,7 +46,7 @@ class OllamaChatSession:
         )
 
         calories = (
-            f"The entire meal plan should total approximately {args.calories} calories "
+            f"The entire meal plan should total approximately {args.calories} calories"
             f"(±10% tolerance)."
             if getattr(args, "calories", None)
             else ""
@@ -102,7 +102,7 @@ class OllamaChatSession:
     Each meal must follow this recipe schema:
     1. Title
     2. Serving size
-    3. Ingredients and amounts
+    3. Ingredients and amounts (measure solid ingredients in grams and liquid ingredients in ml)
     4. Instructions
     5. Nutritional information
     6. Anything else
@@ -111,6 +111,20 @@ class OllamaChatSession:
 
     Use ALL required ingredients across the three meals.
     Return ONLY the structured meal plan — no commentary before or after.
+
+    In the ingredients section (#3), format every ingredient as:
+    <quantity> <unit> <ingredient name>
+
+    Examples:
+    150 g eggs
+    100 g spinach
+    10 g olive oil
+    100 ml orange juice
+
+    Do NOT put the ingredient name before the quantity.
+    Do NOT use colons.
+    Do NOT include parentheses.
+    Do NOT include approximations.
     """
 
         if self.verbosity:
