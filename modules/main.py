@@ -117,7 +117,7 @@ def generate_meal_plan(args):
 
     for i in range(args.max_iterations):
         if args.verbose:
-            print(f'\Current meal plan:{meal_plan}\n')
+            print(f'\nCurrent meal plan:{meal_plan}\n')
         iterations_taken = i + 1
 
         if args.verbose:
