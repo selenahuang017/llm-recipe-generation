@@ -26,7 +26,7 @@ The validator performs several checks on generated meal plans:
 
 **Input:**
 ```bash
-python -m modules.main --model gpt-oss:20b --max_iterations 3 --ingredients 'rhubarb, rice, duck, tomatoes, sesame seeds, persimmon, and oreos' --allergens gluten --calories 1500 --verbose
+python -m modules.main --model gpt-oss:20b --max_iterations 2 --ingredients 'rhubarb, rice, duck, tomatoes, sesame seeds, persimmon, and oreos' --allergens gluten --calories 1500 --verbose
 ```
 
 **Output:**

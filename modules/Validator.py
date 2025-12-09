@@ -196,23 +196,31 @@ class Validator:
         - Markdown bullets
         '''
 
-        # --- 1. Extract section 3 cleanly ---
+        # --- 1. Extract section 3 cleanly (stop before section 4 header) ---
+        normalized = recipe.replace('\r\n', '\n')
+
         section_match = re.search(
-            r'3\.\s*(ingredients[^:\n]*:?)\s*(.*?)\n\s*4\.',
-            recipe,
-            flags=re.IGNORECASE | re.DOTALL
+            r'''(?imsx)
+            ^\s*3\s*[\.\)\-]?\s*(?:ingredients?[^:\n]*:?)\s*\n+   # section 3 header
+            (.*?)                                               # capture body lazily
+            (?=^\s*4\s*[\.\)\-]?\s*)                            # stop exactly at section 4 header
+            ''',
+            normalized
         )
 
         if section_match:
-            ingredients_text = section_match.group(2).strip()
+            ingredients_text = section_match.group(1).strip()
         else:
-            # fallback: grab lines between any 'ingredients' and next numbered section
-            section_match = re.search(
-                r'(ingredients[^:\n]*)(.*?)(?=\n\s*\d+\.)',
-                recipe,
-                flags=re.IGNORECASE | re.DOTALL
+            # fallback: start at an "ingredients" header and stop at the next instructions/directions header (even if unnumbered)
+            fallback_match = re.search(
+                r'''(?imsx)
+                (?:ingredients?[^:\n]*:?)\s*\n+   # ingredients heading
+                (.*?)                             # capture body lazily
+                (?=^\s*[*_#>\-]*\s*(?:4\s*[\.\)\-]?\s*)?(?:instructions?|directions?|steps?)\b|$)  # stop when instructions begin
+                ''',
+                normalized
             )
-            ingredients_text = section_match.group(2).strip() if section_match else recipe
+            ingredients_text = fallback_match.group(1).strip() if fallback_match else recipe
 
         # --- 2. Normalize Unicode fractions ---
         FRACTIONS = {
